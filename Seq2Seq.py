@@ -2,6 +2,7 @@
 
 """
 LSTMの別で学習できるように作成するために作成するスクリプト作成する
+出力形式
 
 """
 
@@ -21,8 +22,7 @@ from keras.utils.vis_utils import plot_model
 import pickle
 import os
 import glob
-from keras_contrib.utils import save_load_utils
-
+import sys
 #TODO:どれくらいまわせばいいのか，語彙いくつでどれだけ回せばいいのかを調べる
 #評価方法を調べる
 
@@ -131,24 +131,9 @@ def OnehotMakedata(filedatalist,picklefilename):
         onehot_vector.append(np.array(list(xd)))
         Next_onehot_vector.append(np.array(list(Next_target)))
 
-    print("shapeのデータ",np.array(onehot_vector).shape)
+    #print("shapeのデータ",np.array(onehot_vector).shape)
 
     return np.array(onehot_vector),np.array(Next_onehot_vector)
-
-traindata_filename = "reverseData5length.csv"
-train_V_picklename ="Vocabulary.pkl"
-testdata_file_name = "reverseData5length.csv"
-
-train_data,label_data = Readdata(traindata_filename)
-train_oh_datas,Next_oh_target = OnehotMakedata(train_data,train_V_picklename)
-train_ohl_datas,Next_ohl_target = OnehotMakedata(label_data,train_V_picklename)
-
-
-#train_onehot_datas = Onehot(train_data)
-#train_label_datas = Onehot(label_data)
-#test_datas, test_label_datas = Readdata(testdata_file_name)
-#test_onehot_datas = OnehotMakedata(test_datas,train_V_picklename)
-#test_onehotl_datas = OnehotMakedata(test_label_datas,train_V_picklename)
 
 
 def Predict(autoencoder,V_picklename):
@@ -185,14 +170,15 @@ def Predict(autoencoder,V_picklename):
         target_seq[0, 0, c_i['<EOS>']] = 1.
 
         stop_condition = False
-        decoded_sentence = ''
+        decoded_sentence = []
         seq_length = 7
         while not stop_condition:
             output_tokens, h, c = decoder_model.predict(
                 [target_seq] + states_value)
 
             sample_char = i_c[np.argmax(output_tokens)]
-            decoded_sentence += sample_char
+            decoded_sentence.append(sample_char)
+
             if (sample_char == '<EOS>' or
                     len(decoded_sentence) > seq_length):
                 stop_condition = True
@@ -203,12 +189,20 @@ def Predict(autoencoder,V_picklename):
             states_value = [h, c]
         return decoded_sentence
 
+    inputdata = []
+    outputdata = []
+    for i, (test_data, one_hot) in enumerate(zip(train_data, train_oh_datas)):
+        outputsentence = decode_sequence(one_hot)
+        if (len(inputdata) == len(outputdata)):
+            inputdata.append(test_data)
+            outputdata.append(outputsentence)
+        else:
+            print("Error")
+    return [inputdata,outputdata]
 
-    for i,(test_data,one_hot) in enumerate(zip(train_data,train_oh_datas)):
-        print("------------------------------------------------------")
-        print("データ番号:",i+1,"テストデータ:",test_data)
-        decoder_sentence=decode_sequence(one_hot)
-        print("decoder",decoder_sentence)
+
+
+
 
 
 
@@ -219,16 +213,14 @@ def Predict(autoencoder,V_picklename):
 
 if __name__ == '__main__':
 
-    """
-    a = np.random.random(100)
-    x = np.array([np.sin([p for p in np.arange(0, 0.8, 0.1)] + aa) for aa in a])
-    x = np.array(x).reshape(100,8,1)#data数,length,dim
-    y = -x
-    print(x.shape) #(1000,8) 8がlength 1000がデータ・セット
-    """
+    traindata_filename = "reverseData5length.csv"
+    train_V_picklename = "Vocabulary.pkl"
+    testdata_file_name = "reverseData5length.csv"
 
-    #print(sentence_length)
-    #print( vocabulary)
+    train_data, label_data = Readdata(traindata_filename)
+    train_oh_datas, Next_oh_target = OnehotMakedata(train_data, train_V_picklename)
+    train_ohl_datas, Next_ohl_target = OnehotMakedata(label_data, train_V_picklename)
+
     ndata = 100
 
     max_input_length = 7
@@ -254,17 +246,37 @@ if __name__ == '__main__':
     model.compile(optimizer=Adam(), loss='categorical_crossentropy')
     model.summary()
     plot_model(model,show_shapes =True,show_layer_names = True,to_file='model/model.png')#dirも追加可能
+    now = datetime.datetime.today()
 
-    sys="predict"
-    if(sys =="fit"):
+    if("-fit" in sys.argv):
         tb_cb = TensorBoard(log_dir="log",histogram_freq=1, write_graph=True, write_images=True)
         model.fit([train_oh_datas,train_ohl_datas],Next_ohl_target,epochs=1000,batch_size = 1,
                   callbacks=[tb_cb],validation_data=([train_oh_datas,train_ohl_datas],Next_ohl_target))#acc は正解率
-        now = datetime.datetime.today()
         model.save('./model/s2s'+now.month+'_'+now.hour+'_'+now.minute+'.h5')
+    elif("-pred" in sys.argv):
+        inputdatas,outputdatas= Predict(model,train_V_picklename)
+        with open("./result/Result" + str(now.month) + '_' + str(now.hour) + '_' + str(now.minute) + ".csv",
+                  mode="w") as f:
+            f.writelines("Input,output")
+            for i, (test_data, outputsentence) in enumerate(zip(inputdatas, outputdatas)):
+                for i, word in enumerate(test_data):
+                    if (i == 1):
+                        f.write(word)
+                    elif word != "<BOS>" and word != "<EOS>":
+                        f.write(" " + word)
+                f.write(",")
+                init = 1
+                for i, word in enumerate(outputsentence):
+                    if word != "<BOS>" and word != "<EOS>":
+                        if (init == 1):
+                            f.write(word)
+                            init = 0
+                        else:
+                            f.write(" " + word)
 
-    elif(sys == "predict"):
-        Predict(model,train_V_picklename)
+                f.write("\n")
+    else:
+        print("-predか-trainかを引数にしてください.")
 
 
     # 未学習のデータでテスト
