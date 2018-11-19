@@ -202,8 +202,9 @@ if __name__ == '__main__':
     ndata = 100
     latent_dim = 128
 
-    sentence_length = train_oh_datas.shape[1]
-    vocabulary = train_oh_datas.shape[2]
+    vocabulary_encoder = train_oh_datas.shape[2]
+    vocabulary_decoder = train_ohl_datas.shape[2]
+
     now = datetime.datetime.today()
 
     print("directiry check")
@@ -216,16 +217,17 @@ if __name__ == '__main__':
 
 
 
-    encoder_inputs = Input(shape=(None,vocabulary))
+    encoder_inputs = Input(shape=(None,vocabulary_encoder))
     encoder = LSTM(latent_dim,return_state=True)
     encoder_outputs,state_h,state_c = encoder(encoder_inputs)
     encoder_states =[state_h,state_c]
 
     #set Decoder
-    decoder_inputs = Input(shape=(None,vocabulary))
+    decoder_inputs = Input(shape=(None,vocabulary_decoder))
+
     decoder_lstm = LSTM(latent_dim,return_state= True,return_sequences=True)
     decoder_outputs,_,_=decoder_lstm(decoder_inputs,initial_state=encoder_states)
-    decoder_dense = Dense(vocabulary,activation='softmax')
+    decoder_dense = Dense(vocabulary_decoder,activation='softmax')
     decoder_outputs = decoder_dense(decoder_outputs)
 
     #Define the  model that will turn
