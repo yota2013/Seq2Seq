@@ -23,82 +23,57 @@ import pickle
 import os
 import glob
 import sys
-#TODO:どれくらいまわせばいいのか，語彙いくつでどれだけ回せばいいのかを調べる
+
 #評価方法を調べる
 
 #kerasｎついてModel(a,b)でaを入力としてbを出力するためにのそうを含まれる．
 #https://keras.io/ja/models/about-keras-models/
 
 
-
-
 def Readdata(filename):
     df = pd.read_csv(filename)
     datas = df["data"]
     label_datas = df["labeldata"]
-    datas = datas.values
-    label_datas = label_datas.values
 
     def Append(datas):
-        max_vector_lenth = 5 + 2#length 決める
-        textdatas = np.empty((0,max_vector_lenth), int)#ここで長さは同じにしてる
 
+        textdatas = []
         for data in datas:
             text = np.array([])
-            data_list = str(data).split()
+            data_list = str(data).split(" ")
             data_length = len(data_list)
-            #for i in range(max_vector_lenth):
             for i, word in enumerate(data_list):
-                 #try:
-                #    word = data_list[i]
-                #except IndexError:
-                #    word = 0
-                if(i == 0):
-                    text = np.append(text,"<BOS>")
+                if (i == 0):
+                    text = np.append(text, "<BOS>")
                     text = np.append(text, word)
-                elif(i >= data_length - 1):
+                elif (i >= data_length - 1):
                     text = np.append(text, word)
                     text = np.append(text, "<EOS>")
                 else:
                     text = np.append(text, word)
-            #print(len(text))
-            if (max_vector_lenth - len(text) ) > 0:#ここでone_hot作成する．+1 はEOSです
-                append_null= max_vector_lenth - (len(text))
-                a =np.zeros(append_null,dtype=int)
-                text = np.insert(text,-1,a)
-            textdatas = np.append(textdatas,[text],axis = 0)
-        return textdatas
+            textdatas.append(text)
+        return np.array(textdatas)
 
-    datas =Append(datas)
+    datas = Append(datas)
     label_datas = Append(label_datas)
-    #print(datas)
-    return datas,label_datas
 
-
-
-def Onehot(datas):
-    sentence_length =len(datas[0])
-    listdata = ','.join(datas.flatten())
-    onehot_data = one_hot(listdata,13,lower=True,split=',')
-    onehot_data_flat = to_categorical(onehot_data)#数字をベクトルに変更する
-    onehot_datas = []
-    ndata = 0
-    for data in datas:
-        temp =[]
-        for i in range(len(data)):
-            temp.append(onehot_data_flat[ndata + i])
-        onehot_datas.append(temp)
-        ndata += len(data)
-    return np.array(onehot_datas)
+    return datas, label_datas
 
 
 #target も作成できるようにする
 def OnehotMakedata(filedatalist,picklefilename):
-    sentence_length = len(filedatalist[0])
+    max_sentence_length = 0
+    for word in filedatalist:
+        if max_sentence_length < len(word):
+            max_sentence_length = len(word)
+    sentence_length = max_sentence_length
+
     print(sentence_length)
     c_f = {}  # {}で辞書オブジェクトを作成する c_fはindexの場所を指す
-    depth = 100  # Vocablaryによるが#depth位以下の単語を削る
+    depth = 199  # Vocablaryによるが#depth位以下の単語を削る
+
     "Vocaburary辞書を作成する"
+
     if (os.path.isfile("./" + picklefilename) == False):
         for data in filedatalist:
             for word in data:
@@ -118,6 +93,7 @@ def OnehotMakedata(filedatalist,picklefilename):
     #辞書ロードし，それをOnehotに変更する.Readdata
     onehot_vector = []
     Next_onehot_vector = []
+
     for i,data in enumerate(filedatalist):
         xd = [[0.] * len(c_i) for _ in range(sentence_length)]
         Next_target =  [[0.] * len(c_i) for _ in range(sentence_length)]
@@ -164,14 +140,14 @@ def Predict(autoencoder,V_picklename):
         [decoder_outputs] + decoder_states)
 
     def decode_sequence(input_seq):
-        b = np.reshape(input_seq, (1,7,11))
+        b = np.reshape(input_seq, (1,20,200))
         states_value = encoder_model.predict([b])
-        target_seq = np.zeros((1, 1, 11))
+        target_seq = np.zeros((1, 1, 200))
         target_seq[0, 0, c_i['<EOS>']] = 1.
 
         stop_condition = False
         decoded_sentence = []
-        seq_length = 7
+        seq_length = 20
         while not stop_condition:
             output_tokens, h, c = decoder_model.predict(
                 [target_seq] + states_value)
@@ -213,20 +189,32 @@ def Predict(autoencoder,V_picklename):
 
 if __name__ == '__main__':
 
-    traindata_filename = "reverseData5length.csv"
+    traindata_filename = "traindata.csv"
     train_V_picklename = "Vocabulary.pkl"
-    testdata_file_name = "reverseData5length.csv"
-
+    V_picklename = "Vocabularytrain.pkl"
+    testdata_file_name = "traindata.csv"
+    print("data Download")
     train_data, label_data = Readdata(traindata_filename)
+    print("Onehot Vector")
     train_oh_datas, Next_oh_target = OnehotMakedata(train_data, train_V_picklename)
-    train_ohl_datas, Next_ohl_target = OnehotMakedata(label_data, train_V_picklename)
+    train_ohl_datas, Next_ohl_target = OnehotMakedata(label_data, V_picklename)
 
     ndata = 100
+    latent_dim = 128
 
-    max_input_length = 7
-    latent_dim = 11
     sentence_length = train_oh_datas.shape[1]
     vocabulary = train_oh_datas.shape[2]
+    now = datetime.datetime.today()
+
+    print("directiry check")
+    if os.path.exists("./result") == False:
+        os.mkdir("result")
+    if os.path.exists("./model") == False:
+        os.mkdir("model")
+    if os.path.exists("./log") == False:
+        os.mkdir("log")
+
+
 
     encoder_inputs = Input(shape=(None,vocabulary))
     encoder = LSTM(latent_dim,return_state=True)
@@ -246,14 +234,13 @@ if __name__ == '__main__':
     model.compile(optimizer=Adam(), loss='categorical_crossentropy')
     model.summary()
     plot_model(model,show_shapes =True,show_layer_names = True,to_file='model/model.png')#dirも追加可能
-    now = datetime.datetime.today()
 
     if("-fit" in sys.argv):
         tb_cb = TensorBoard(log_dir="log",histogram_freq=1, write_graph=True, write_images=True)
         model.fit([train_oh_datas,train_ohl_datas],Next_ohl_target,epochs=1000,batch_size = 1,
                   callbacks=[tb_cb],validation_data=([train_oh_datas,train_ohl_datas],Next_ohl_target))#acc は正解率
         model.save('./model/s2s'+now.month+'_'+now.hour+'_'+now.minute+'.h5')
-    elif("-pred" in sys.argv):
+    elif("-train" in sys.argv):
         inputdatas,outputdatas= Predict(model,train_V_picklename)
         with open("./result/Result" + str(now.month) + '_' + str(now.hour) + '_' + str(now.minute) + ".csv",
                   mode="w") as f:
@@ -284,5 +271,3 @@ if __name__ == '__main__':
     #print(model.evaluate(x_test, y_test, batch_size=32))
     # 未学習のデータで生成
     #predicted = model.predict(x_test, batch_size=32)
-
-
