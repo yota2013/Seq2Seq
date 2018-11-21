@@ -200,7 +200,7 @@ if __name__ == '__main__':
     train_ohl_datas, Next_ohl_target = OnehotMakedata(label_data, V_picklename)
 
     ndata = 100
-    latent_dim = 128
+    latent_dim = 11
 
     vocabulary_encoder = train_oh_datas.shape[2]
     vocabulary_decoder = train_ohl_datas.shape[2]
@@ -237,12 +237,12 @@ if __name__ == '__main__':
     model.summary()
     plot_model(model,show_shapes =True,show_layer_names = True,to_file='model/model.png')#dirも追加可能
 
-    if("-fit" in sys.argv):
+    if("-train" in sys.argv):
         tb_cb = TensorBoard(log_dir="log",histogram_freq=1, write_graph=True, write_images=True)
         model.fit([train_oh_datas,train_ohl_datas],Next_ohl_target,epochs=1000,batch_size = 1,
                   callbacks=[tb_cb],validation_data=([train_oh_datas,train_ohl_datas],Next_ohl_target))#acc は正解率
         model.save('./model/s2s'+now.month+'_'+now.hour+'_'+now.minute+'.h5')
-    elif("-train" in sys.argv):
+    elif("-predict" in sys.argv):
         inputdatas,outputdatas= Predict(model,train_V_picklename)
         with open("./result/Result" + str(now.month) + '_' + str(now.hour) + '_' + str(now.minute) + ".csv",
                   mode="w") as f:
