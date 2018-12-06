@@ -11,18 +11,20 @@ import  numpy as np
 from  keras.models import load_model
 import datetime
 from keras.optimizers  import SGD, RMSprop, Adam
-from keras.layers import  LSTM,Dense,Input, RepeatVector
+from keras.layers import  LSTM,Dense,Input, RepeatVector, Lambda
 from keras.models import Model
 from keras.callbacks import TensorBoard
-import pandas as pd
-from keras.preprocessing.text import one_hot
-from keras.utils.np_utils import to_categorical
-from keras.layers.core   import Flatten,Activation
+from keras import backend as K
 from keras.utils.vis_utils import plot_model
 import pickle
 import os
 import glob
 import sys
+from keras.losses import categorical_crossentropy
+from keras import backend as K
+import math
+import MeCab
+import pandas as pd
 
 #評価方法を調べる
 
@@ -31,7 +33,7 @@ import sys
 
 
 def Readdata(filename):
-    df = pd.read_csv(filename)
+    df = pd.read_csv(filename,encoding="cp932")#データ読み込み
     datas = df["data"]
     label_datas = df["labeldata"]
 
@@ -40,7 +42,13 @@ def Readdata(filename):
         textdatas = []
         for data in datas:
             text = np.array([])
-            data_list = str(data).split(" ")
+
+            """日本語用"""
+            tagger= MeCab.Tagger("-Owakati")
+            data=tagger.parse(data)
+            data_list = (str(data).replace('\n','')).split(" ")
+            data_list = [x for x in data_list if x]#空白消去
+            #print(data_list)
             data_length = len(data_list)
             for i, word in enumerate(data_list):
                 if (i == 0):
@@ -61,8 +69,8 @@ def Readdata(filename):
 
 
 #target も作成できるようにする
-def OnehotMakedata(filedatalist,picklefilename):
-    max_sentence_length = 0
+def OnehotMakedata(filedatalist,picklefilename,max_sentence_length = 0):
+
     for word in filedatalist:
         if max_sentence_length < len(word):
             max_sentence_length = len(word)
@@ -70,7 +78,7 @@ def OnehotMakedata(filedatalist,picklefilename):
 
     print(sentence_length)
     c_f = {}  # {}で辞書オブジェクトを作成する c_fはindexの場所を指す
-    depth = 199  # Vocablaryによるが#depth位以下の単語を削る
+    depth = 250  # Vocablaryによるが#depth位以下の単語を削る
 
     "Vocaburary辞書を作成する"
 
@@ -112,11 +120,16 @@ def OnehotMakedata(filedatalist,picklefilename):
     return np.array(onehot_vector),np.array(Next_onehot_vector)
 
 
-def Predict(autoencoder,V_picklename):
+
+
+def Predict(autoencoder,V_picklename,eval_data, eval_oh_datas):
     c_i = pickle.loads(open(V_picklename, "rb").read())
     i_c = {i: c for c, i in c_i.items()} #これ好き
 
-    model = sorted(glob.glob("./model/*.h5")).pop(0)
+    c_i = pickle.loads(open(V_picklename, "rb").read())
+    i_c = {i: c for c, i in c_i.items()}  # これ好き
+
+    model = sorted(glob.glob("./model/s2s12_2_55Result.h5")).pop(0)#TODO:out_put_vector
     print("loaded model is ", model)
     model = load_model(model)
 
@@ -140,14 +153,14 @@ def Predict(autoencoder,V_picklename):
         [decoder_outputs] + decoder_states)
 
     def decode_sequence(input_seq):
-        b = np.reshape(input_seq, (1,20,200))
+        b = np.reshape(input_seq, (1,input_seq.shape[0],input_seq.shape[1]))
         states_value = encoder_model.predict([b])
-        target_seq = np.zeros((1, 1, 200))
-        target_seq[0, 0, c_i['<EOS>']] = 1.
+        target_seq = np.zeros((1, 1, 50))#TODO:out_put_vectorのVocabulary
+        target_seq[0, 0, c_i['<BOS>']] = 1.
 
         stop_condition = False
         decoded_sentence = []
-        seq_length = 20
+        seq_length = 50#TODO:out_put_vector
         while not stop_condition:
             output_tokens, h, c = decoder_model.predict(
                 [target_seq] + states_value)
@@ -159,7 +172,7 @@ def Predict(autoencoder,V_picklename):
                     len(decoded_sentence) > seq_length):
                 stop_condition = True
             # Update the target sequence (of length 1).
-            target_seq = np.zeros((1, 1, 11))
+            target_seq = np.zeros((1, 1, 50))#TODO:out_put_vector
             target_seq[0, 0, np.argmax(output_tokens)] = 1.
             # Update states
             states_value = [h, c]
@@ -167,7 +180,9 @@ def Predict(autoencoder,V_picklename):
 
     inputdata = []
     outputdata = []
-    for i, (test_data, one_hot) in enumerate(zip(train_data, train_oh_datas)):
+
+
+    for i, (test_data, one_hot) in enumerate(zip(eval_data, eval_oh_datas)):
         outputsentence = decode_sequence(one_hot)
         if (len(inputdata) == len(outputdata)):
             inputdata.append(test_data)
@@ -192,20 +207,22 @@ if __name__ == '__main__':
     traindata_filename = "traindata.csv"
     train_V_picklename = "Vocabulary.pkl"
     V_picklename = "Vocabularytrain.pkl"
-    testdata_file_name = "traindata.csv"
+    testdata_file_name = "test.csv"
+
     print("data Download")
-    train_data, label_data = Readdata(traindata_filename)
+    train_data, label_datas = Readdata(traindata_filename)
     print("Onehot Vector")
     train_oh_datas, Next_oh_target = OnehotMakedata(train_data, train_V_picklename)
-    train_ohl_datas, Next_ohl_target = OnehotMakedata(label_data, V_picklename)
+    train_ohl_datas, Next_ohl_target = OnehotMakedata(label_datas, V_picklename)
 
-    ndata = 100
-    latent_dim = 11
+
+    latent_dim = 50
 
     vocabulary_encoder = train_oh_datas.shape[2]
     vocabulary_decoder = train_ohl_datas.shape[2]
 
     now = datetime.datetime.today()
+    nowtime =str(now.month)+'_'+str(now.hour)+'_'+str(now.minute)+"Result"
 
     print("directiry check")
     if os.path.exists("./result") == False:
@@ -214,6 +231,10 @@ if __name__ == '__main__':
         os.mkdir("model")
     if os.path.exists("./log") == False:
         os.mkdir("log")
+    if os.path.exists("./result/"+nowtime) == False:
+        print("ディレクトリ作成")
+        os.mkdir("./result/"+nowtime)
+
 
 
 
@@ -224,11 +245,23 @@ if __name__ == '__main__':
 
     #set Decoder
     decoder_inputs = Input(shape=(None,vocabulary_decoder))
-
     decoder_lstm = LSTM(latent_dim,return_state= True,return_sequences=True)
-    decoder_outputs,_,_=decoder_lstm(decoder_inputs,initial_state=encoder_states)
+    decoder_outputs,_,_= decoder_lstm(decoder_inputs,initial_state=encoder_states)
     decoder_dense = Dense(vocabulary_decoder,activation='softmax')
     decoder_outputs = decoder_dense(decoder_outputs)
+
+    #y_true: 正解ラベル．TensorFlow / Theanoテンソル
+    #y_pred: 予測値．y_trueと同じshapeのTensorFlow / Theanoテンソル
+
+    #perplexity
+    def ppx(y_true,y_pred):
+        loss = categorical_crossentropy(y_true, y_pred)
+        perplexity = K.cast(K.pow(math.e, K.mean(loss, axis=-1)), K.floatx())
+        return perplexity
+
+    perplextiy = ppx(Next_ohl_target,decoder_outputs)
+    print("PPL"+str(perplextiy))
+
 
     #Define the  model that will turn
     model = Model([encoder_inputs,decoder_inputs],decoder_outputs)
@@ -239,15 +272,20 @@ if __name__ == '__main__':
 
     if("-train" in sys.argv):
         tb_cb = TensorBoard(log_dir="log",histogram_freq=1, write_graph=True, write_images=True)
-        model.fit([train_oh_datas,train_ohl_datas],Next_ohl_target,epochs=1000,batch_size = 1,
+        model.fit([train_oh_datas,train_ohl_datas],Next_ohl_target,epochs=10,batch_size = 1,
                   callbacks=[tb_cb],validation_data=([train_oh_datas,train_ohl_datas],Next_ohl_target))#acc は正解率
-        model.save('./model/s2s'+now.month+'_'+now.hour+'_'+now.minute+'.h5')
-    elif("-predict" in sys.argv):
-        inputdatas,outputdatas= Predict(model,train_V_picklename)
-        with open("./result/Result" + str(now.month) + '_' + str(now.hour) + '_' + str(now.minute) + ".csv",
+        model.save('./model/s2s'+nowtime+'.h5')
+    elif("-pred" in sys.argv):
+
+        print("Predict")
+        evaluate_Inputdata, _ = Readdata(testdata_file_name)
+        evaluate_oh_datas, _ = OnehotMakedata(evaluate_Inputdata, train_V_picklename,train_oh_datas.shape[1])
+
+        inputdatas,outputdatas= Predict(model, V_picklename,evaluate_Inputdata,evaluate_oh_datas)
+        with open("./result/"+nowtime+"/"+"result"+str(now.month)+'_'+str(now.hour)+'_'+str(now.minute) + ".csv",
                   mode="w") as f:
-            f.writelines("Input,output")
-            for i, (test_data, outputsentence) in enumerate(zip(inputdatas, outputdatas)):
+            f.writelines("Input,Predict_Output,Labeldata\n")
+            for i, (test_data, outputsentence,label_data) in enumerate(zip(inputdatas, outputdatas,label_datas)):
                 for i, word in enumerate(test_data):
                     if (i == 1):
                         f.write(word)
@@ -262,6 +300,18 @@ if __name__ == '__main__':
                             init = 0
                         else:
                             f.write(" " + word)
+
+                f.write(",")
+                init = 1
+                for i, word in enumerate(label_data):
+                    if word != "<BOS>" and word != "<EOS>":
+                        if (init == 1):
+                            f.write(word)
+                            init = 0
+                        else:
+                            f.write(" " + word)
+
+
 
                 f.write("\n")
     else:
