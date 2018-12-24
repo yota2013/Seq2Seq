@@ -23,32 +23,58 @@ import sys
 from keras.losses import categorical_crossentropy
 from keras import backend as K
 import math
-import MeCab
 import pandas as pd
+from pykakasi import kakasi
 
 #評価方法を調べる
 
 #kerasｎついてModel(a,b)でaを入力としてbを出力するためにのそうを含まれる．
 #https://keras.io/ja/models/about-keras-models/
 
+"""日本語用変換設定"""
+kakasi = kakasi() # Generate kakasi instance
+kakasi.setMode("H", "a")  # Hiragana to ascii
+kakasi.setMode("K", "a")  # Katakana to ascii
+kakasi.setMode("J", "a")  # Japanese(kanji) to ascii
+kakasi.setMode("r", "Hepburn")  # Use Hepburn romanization
+""""""
+
 
 def Readdata(filename):
     df = pd.read_csv(filename,encoding="cp932")#データ読み込み
-    datas = df["data"]
-    label_datas = df["labeldata"]
-
+    datas = df["Noisylabel"]
+    label_datas = df["Labeldata"]
     def Append(datas):
 
         textdatas = []
         for data in datas:
             text = np.array([])
+            #Noisy用
+            data = data.split(" ")
+            #conv = kakasi.getConverter()
+            #data = conv.do(data)
+            #data_list = list((str(data).replace('\n','')))
+            data_length = len(data)
+            for i, word in enumerate(data):
+                if (i == 0):
+                    text = np.append(text, "<BOS>")
+                    text = np.append(text, word)
+                elif (i >= data_length - 1):
+                    text = np.append(text, word)
+                    text = np.append(text, "<EOS>")
+                else:
+                    text = np.append(text, word)
+            textdatas.append(text)
+        return np.array(textdatas)
 
-            """日本語用"""
-            tagger= MeCab.Tagger("-Owakati")
-            data=tagger.parse(data)
-            data_list = (str(data).replace('\n','')).split(" ")
-            data_list = [x for x in data_list if x]#空白消去
-            #print(data_list)
+    def AppendComand(datas):
+
+        textdatas = []
+        for data in datas:
+            text = np.array([])
+            data_list = (str(data).replace('\n', '')).split(" ")
+            data_list = [x for x in data_list if x]  # 空白消去
+            # print(data_list)
             data_length = len(data_list)
             for i, word in enumerate(data_list):
                 if (i == 0):
@@ -63,7 +89,7 @@ def Readdata(filename):
         return np.array(textdatas)
 
     datas = Append(datas)
-    label_datas = Append(label_datas)
+    label_datas = AppendComand(label_datas)
 
     return datas, label_datas
 
@@ -129,7 +155,7 @@ def Predict(autoencoder,V_picklename,eval_data, eval_oh_datas):
     c_i = pickle.loads(open(V_picklename, "rb").read())
     i_c = {i: c for c, i in c_i.items()}  # これ好き
 
-    model = sorted(glob.glob("./model/s2s12_2_55Result.h5")).pop(0)#TODO:out_put_vector
+    model = sorted(glob.glob("./model/s2schar12_22_10Result.h5")).pop(0)#TODO:out_put_vector
     print("loaded model is ", model)
     model = load_model(model)
 
@@ -155,7 +181,7 @@ def Predict(autoencoder,V_picklename,eval_data, eval_oh_datas):
     def decode_sequence(input_seq):
         b = np.reshape(input_seq, (1,input_seq.shape[0],input_seq.shape[1]))
         states_value = encoder_model.predict([b])
-        target_seq = np.zeros((1, 1, 50))#TODO:out_put_vectorのVocabulary
+        target_seq = np.zeros((1, 1, 52))#TODO:out_put_vectorのVocabulary
         target_seq[0, 0, c_i['<BOS>']] = 1.
 
         stop_condition = False
@@ -172,7 +198,7 @@ def Predict(autoencoder,V_picklename,eval_data, eval_oh_datas):
                     len(decoded_sentence) > seq_length):
                 stop_condition = True
             # Update the target sequence (of length 1).
-            target_seq = np.zeros((1, 1, 50))#TODO:out_put_vector
+            target_seq = np.zeros((1, 1, 52))#TODO:out_put_vector
             target_seq[0, 0, np.argmax(output_tokens)] = 1.
             # Update states
             states_value = [h, c]
@@ -205,9 +231,9 @@ def Predict(autoencoder,V_picklename,eval_data, eval_oh_datas):
 if __name__ == '__main__':
 
     traindata_filename = "traindata.csv"
-    train_V_picklename = "Vocabulary.pkl"
-    V_picklename = "Vocabularytrain.pkl"
-    testdata_file_name = "test.csv"
+    train_V_picklename = "Vocabularytrain.pkl"
+    V_picklename = "Vocabularylabel.pkl"
+    testdata_file_name = "testdata.csv"
 
     print("data Download")
     train_data, label_datas = Readdata(traindata_filename)
@@ -222,7 +248,7 @@ if __name__ == '__main__':
     vocabulary_decoder = train_ohl_datas.shape[2]
 
     now = datetime.datetime.today()
-    nowtime =str(now.month)+'_'+str(now.hour)+'_'+str(now.minute)+"Result"
+    nowtime =str(now.day)+'_'+str(now.hour)+'_'+str(now.minute)+"Result"
 
     print("directiry check")
     if os.path.exists("./result") == False:
@@ -274,7 +300,7 @@ if __name__ == '__main__':
         tb_cb = TensorBoard(log_dir="log",histogram_freq=1, write_graph=True, write_images=True)
         model.fit([train_oh_datas,train_ohl_datas],Next_ohl_target,epochs=10,batch_size = 1,
                   callbacks=[tb_cb],validation_data=([train_oh_datas,train_ohl_datas],Next_ohl_target))#acc は正解率
-        model.save('./model/s2s'+nowtime+'.h5')
+        model.save('./model/s2schar'+nowtime+'.h5')
     elif("-pred" in sys.argv):
 
         print("Predict")
